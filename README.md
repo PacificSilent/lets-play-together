@@ -66,14 +66,6 @@ or production:
 npm run build:serve
 ```
 
-### Using Docker
-
-Start the development container:
-
-```bash
-docker compose up
-```
-
 ## 📦 Deployment
 
 ### Cloud Platform
