@@ -1,6 +1,8 @@
-# Screen Sharing Application
+# Let's Play Together (Fork)
 
-A real-time screen sharing application built with Next.js, WebRTC, and PeerJS. Create or join rooms to share your screen with others instantly.
+A real-time screen sharing application built with Next.js, WebRTC, and PeerJS. Create or join rooms to share your screen with others instantly. Additionally, it supports joystick input, making it possible to play games with others.
+
+> **Note:** This project is a fork of the [original repository](https://github.com/tonghohin/screen-sharing).
 
 ## ✨ Features
 
@@ -8,20 +10,15 @@ A real-time screen sharing application built with Next.js, WebRTC, and PeerJS. C
 - Room-based sharing system
 - Cross-browser support
 - Simple and intuitive interface
+- Joystick support
+- Dynamic bitrate and resolution adjustments based on packet loss or poor client connection
+- PWA (Progressive Web App) support
+- Video streaming statistics
 
 ## 📱 Device Support
 
 - **Hosting**: Desktop/laptop browsers only
 - **Viewing**: Works on all devices (desktop, tablet, mobile)
-
-## 🌐 Browser Support
-
-| Browser             | Screen Sharing | Audio Sharing                |
-| ------------------- | -------------- | ---------------------------- |
-| **Google Chrome**   | ✅             | ✅ (Only when sharing a tab) |
-| **Microsoft Edge**  | ✅             | ✅ (Only when sharing a tab) |
-| **Mozilla Firefox** | ✅             | ❌                           |
-| **Apple Safari**    | ✅             | ❌                           |
 
 ### Important Notes
 
@@ -33,6 +30,7 @@ A real-time screen sharing application built with Next.js, WebRTC, and PeerJS. C
 - [PeerJS](https://peerjs.com/) - WebRTC abstraction
 - [Tailwind CSS](https://tailwindcss.com/) - Styling
 - [shadcn/ui](https://ui.shadcn.com/) - UI components
+- [vigembus-websocket](https://github.com/PacificSilent/vigembus-websocket) - Complementary project for joystick support
 
 ## 🚀 Getting Started
 
@@ -90,4 +88,4 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.Screen Sharing Application (Fork)

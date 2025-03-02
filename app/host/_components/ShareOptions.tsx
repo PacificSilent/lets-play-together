@@ -28,6 +28,15 @@ export function ShareOptions({ roomId }: ShareOptionsProps) {
         });
     }
 
+    function copyDeepLink() {
+        const deeplinkUrl = `${window.location.origin}/?deeplink=${roomId}`;
+        navigator.clipboard.writeText(deeplinkUrl);
+        toast({
+            title: "Deep link copied!",
+            description: "Share this deep link URL to let others join via the deep linking experience."
+        });
+    }
+
     return (
         <div className="space-y-6">
             <div className="space-y-2">
@@ -59,6 +68,17 @@ export function ShareOptions({ roomId }: ShareOptionsProps) {
                     </Button>
                 </div>
                 <code className="block w-full p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-sm font-mono truncate">{roomId ? `${window.location.origin}/join?room=${roomId}` : "Generating link..."}</code>
+            </div>
+
+            <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                    <span>Deep Link URL</span>
+                    <Button variant="ghost" size="sm" className="gap-2" onClick={copyDeepLink} disabled={!roomId}>
+                        <LinkIcon className="h-4 w-4" />
+                        Copy Deep Link
+                    </Button>
+                </div>
+                <code className="block w-full p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-sm font-mono truncate">{roomId ? `${window.location.origin}/?deeplink=${roomId}` : "Generating deep link..."}</code>
             </div>
         </div>
     );
