@@ -87,3 +87,9 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.Screen Sharing Application (Fork)
+
+---
+
+Made by **[Jona](https://github.com/PacificSilent)** 😊
+
+---
