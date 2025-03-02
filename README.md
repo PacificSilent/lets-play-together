@@ -37,13 +37,13 @@ A real-time screen sharing application built with Next.js, WebRTC, and PeerJS. C
 First, clone the repository:
 
 ```bash
-git clone https://github.com/tonghohin/screen-sharing.git
+git clone https://github.com/PacificSilent/lets-play-together.git
 ```
 
 Navigate to the project directory:
 
 ```bash
-cd screen-sharing
+cd lets-play-together
 ```
 
 ### Using npm
@@ -60,6 +60,12 @@ Start the development server:
 npm run dev
 ```
 
+or production:
+
+```bash
+npm run build:serve
+```
+
 ### Using Docker
 
 Start the development container:
@@ -73,14 +79,6 @@ docker compose up
 ### Cloud Platform
 
 This application can be deployed on any cloud platform that supports static site hosting.
-
-### Self Hosting
-
-You can self-host this application using Docker:
-
-```bash
-docker run -p 3000:3000 -d --name screen-sharing ghcr.io/tonghohin/screen-sharing:latest
-```
 
 ## 👥 Contributing
 
