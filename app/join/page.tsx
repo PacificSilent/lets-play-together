@@ -10,6 +10,23 @@ import Peer, { DataConnection, MediaConnection } from "peerjs";
 import { useEffect, useRef, useState } from "react";
 import "@/styles/fullscreen.css";
 
+// Variable global para acumular las estadísticas similares al host
+let joinStats = {
+    start: 0,
+    bytesReceived: 0
+};
+
+function formatTime(totalSeconds: number) {
+    const hours = Math.floor(totalSeconds / 3600)
+        .toString()
+        .padStart(2, "0");
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+        .toString()
+        .padStart(2, "0");
+    const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+    return `${hours}:${minutes}:${seconds}`;
+}
+
 export default function JoinPage() {
     const [mounted, setMounted] = useState(false);
     const [roomId, setRoomId] = useState("");
@@ -18,15 +35,19 @@ export default function JoinPage() {
     const [showVideoControls, setShowVideoControls] = useState(false);
     const [videoPlaying, setVideoPlaying] = useState(true);
     const [videoMuted, setVideoMuted] = useState(true);
-
     const [showStats, setShowStats] = useState(false);
     const [statsData, setStatsData] = useState({
         fps: 0,
         packetLoss: 0,
-        rtt: 0,
+        ms: 0,
         jitter: 0,
         width: 0,
-        height: 0
+        height: 0,
+        videoEncoder: "",
+        consumptionMB: 0,
+        timer: "00:00:00",
+        audioCodec: "",
+        audioSampleRate: 0
     });
     const [joinCall, setJoinCall] = useState<MediaConnection | null>(null);
     const [isPWA, setIsPWA] = useState(false);
@@ -99,6 +120,10 @@ export default function JoinPage() {
 
             peer.on("call", (call) => {
                 setJoinCall(call);
+                // Al recibir la llamada, iniciamos el contador si aún no existe
+                if (!joinStats.start) {
+                    joinStats.start = Date.now();
+                }
                 call.answer();
                 call.on("stream", (remoteStream) => {
                     setActiveStream(remoteStream);
@@ -192,42 +217,66 @@ export default function JoinPage() {
 
     useEffect(() => {
         let intervalId: ReturnType<typeof setInterval>;
-        const lastBytesRef = { value: 0 };
-        const lastTimestampRef = { value: Date.now() };
-
         if (joinCall && joinCall.peerConnection) {
             intervalId = setInterval(async () => {
                 try {
                     const statsReport = await joinCall.peerConnection.getStats();
                     let framesPerSecond = 0;
                     let packetsLost = 0;
-                    let roundTripTime = 0;
                     let jitter = 0;
-                    let bytesReceived = 0;
                     let width = 0;
                     let height = 0;
+                    let rtt = 0;
+                    let totalInboundBytes = 0;
+                    let codec = "";
+                    let audioCodec = "";
+                    let audioSampleRate = 0;
 
+                    // Recorremos el reporte de estadísticas
                     statsReport.forEach((report) => {
-                        if (report.type === "inbound-rtp" && report.kind === "video") {
-                            framesPerSecond = (report as any).framesPerSecond || framesPerSecond;
-                            packetsLost = report.packetsLost || packetsLost;
-                            jitter = report.jitter || jitter;
-                            bytesReceived = report.bytesReceived || bytesReceived;
-                            width = (report as any).frameWidth || width;
-                            height = (report as any).frameHeight || height;
+                        console.log(JSON.stringify(report, null, 2));
+                        if (report.type === "inbound-rtp") {
+                            // Sumamos bytesReceived de todos los reportes inbound-rtp
+                            totalInboundBytes += report.bytesReceived || 0;
+                            if (report.kind === "video") {
+                                framesPerSecond = (report as any).framesPerSecond || framesPerSecond;
+                                packetsLost = report.packetsLost || packetsLost;
+                                jitter = report.jitter || jitter;
+                                width = (report as any).frameWidth || width;
+                                height = (report as any).frameHeight || height;
+                            }
                         }
-                        if (report.type === "remote-inbound-rtp" && report.kind === "video") {
-                            roundTripTime = (report as any).roundTripTime || roundTripTime;
+                        if (report.type === "candidate-pair") {
+                            rtt = report.roundTripTime ? Math.round(report.currentRoundTripTime * 1000) : rtt;
+                        }
+
+                        if (report.type === "codec") {
+                            codec = report.mimeType || codec;
+                        }
+
+                        // Extraemos la info de audio del reporte de codec
+                        if (report.type === "codec" && report.mimeType && report.mimeType.startsWith("audio/")) {
+                            audioCodec = report.mimeType;
+                            audioSampleRate = report.clockRate;
                         }
                     });
+
+                    // Actualizamos la variable global joinStats con los bytes recibidos
+                    joinStats.bytesReceived += totalInboundBytes;
+                    const elapsedSec = joinStats.start ? Math.floor((Date.now() - joinStats.start) / 1000) : 0;
 
                     setStatsData({
                         fps: framesPerSecond,
                         packetLoss: packetsLost,
-                        rtt: roundTripTime,
-                        jitter,
-                        width,
-                        height
+                        ms: rtt,
+                        jitter: jitter,
+                        width: width,
+                        height: height,
+                        videoEncoder: codec,
+                        consumptionMB: joinStats.bytesReceived / (1024 * 1024),
+                        timer: formatTime(elapsedSec),
+                        audioCodec: audioCodec,
+                        audioSampleRate: audioSampleRate
                     });
                 } catch (err) {
                     console.error("Error updating stats", err);
@@ -287,11 +336,16 @@ export default function JoinPage() {
                                                 <h4 className="mb-2 text-sm font-bold">Streaming Stats</h4>
                                                 <p className="text-xs">FPS: {statsData.fps}</p>
                                                 <p className="text-xs">Packet Loss: {statsData.packetLoss}</p>
-                                                <p className="text-xs">RTT: {statsData.rtt.toFixed(3)} s</p>
+                                                <p className="text-xs">RTT: {statsData.ms} ms</p>
                                                 <p className="text-xs">Jitter: {statsData.jitter}</p>
                                                 <p className="text-xs">
                                                     Resolution: {statsData.width}x{statsData.height}
                                                 </p>
+                                                <p className="text-xs">Consumption: {statsData.consumptionMB.toFixed(2)} MB</p>
+                                                <p className="text-xs">Codec: {statsData.videoEncoder}</p>
+                                                <p className="text-xs">Streaming Time: {statsData.timer}</p>
+                                                <p className="text-xs">Audio Codec: {statsData.audioCodec}</p>
+                                                <p className="text-xs">Sample Rate: {statsData.audioSampleRate} Hz</p>
                                             </div>
                                         )}
                                     </div>
