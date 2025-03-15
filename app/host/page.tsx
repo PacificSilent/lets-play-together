@@ -12,23 +12,14 @@ import { useEffect, useRef, useState } from "react";
 import { ShareOptions } from "./_components/ShareOptions";
 import { customAlphabet } from "nanoid";
 
-// 3mbps
+// Constantes
 const INITIAL_BITRATE = 3000000;
 const MONITOR_INTERVAL = 1000;
-
-const MAX_RESOLUTION = {
-    width: 1920,
-    height: 1080
-};
-
-const LOW_RESOLUTION = {
-    width: 1366,
-    height: 768
-};
-
+const MAX_RESOLUTION = { width: 1920, height: 1080 };
+const LOW_RESOLUTION = { width: 1366, height: 768 };
 const simpleNanoid = customAlphabet("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 4);
 
-// Variable global que acumula todas las métricas
+// Variable global para acumular métricas
 let contador = {
     bytes: 0,
     candidatePairBytes: 0,
@@ -46,7 +37,6 @@ function adjustBitrate(sender: RTCRtpSender, targetBitrate: number) {
     if (!params.encodings) {
         params.encodings = [{}];
     }
-    // TODO: DEJAR ENCODING H265
     params.encodings[0].maxBitrate = targetBitrate;
     params.encodings[0].maxFramerate = 60;
     params.encodings[0].networkPriority = "high";
@@ -57,24 +47,18 @@ function adjustBitrate(sender: RTCRtpSender, targetBitrate: number) {
 
 async function adjustResolution(track: MediaStreamTrack, resolution: "low" | "high") {
     try {
-        if (track.kind === "audio") {
+        if (resolution === "low") {
             await track.applyConstraints({
-                sampleRate: { ideal: 16000 }
+                frameRate: { ideal: 60, max: 60 },
+                width: { ideal: LOW_RESOLUTION.width, max: LOW_RESOLUTION.width },
+                height: { ideal: LOW_RESOLUTION.height, max: LOW_RESOLUTION.height }
             });
         } else {
-            if (resolution === "low") {
-                await track.applyConstraints({
-                    frameRate: { ideal: 60, max: 60 },
-                    width: { ideal: LOW_RESOLUTION.width, max: LOW_RESOLUTION.width },
-                    height: { ideal: LOW_RESOLUTION.height, max: LOW_RESOLUTION.height }
-                });
-            } else {
-                await track.applyConstraints({
-                    frameRate: { ideal: 60, max: 60 },
-                    width: { ideal: MAX_RESOLUTION.width, max: MAX_RESOLUTION.width },
-                    height: { ideal: MAX_RESOLUTION.height, max: MAX_RESOLUTION.height }
-                });
-            }
+            await track.applyConstraints({
+                frameRate: { ideal: 60, max: 60 },
+                width: { ideal: MAX_RESOLUTION.width, max: MAX_RESOLUTION.width },
+                height: { ideal: MAX_RESOLUTION.height, max: MAX_RESOLUTION.height }
+            });
         }
     } catch (err) {
         console.error("Error adjusting resolution:", err);
@@ -82,19 +66,11 @@ async function adjustResolution(track: MediaStreamTrack, resolution: "low" | "hi
 }
 
 /* 
-  monitorAndAdjustBitrate ahora utiliza la variable global "contador" para acumular
-  separadamente los bytes de candidate-pair, outbound-rtp y transport (sent y received)
+  monitorAndAdjustBitrate actualiza todas las métricas de streaming con un único callback.
+  El callback updateMetrics recibe un objeto con candidatePair, outboundRtp, transportSent,
+  transportReceived y bitrate.
 */
-async function monitorAndAdjustBitrate(
-    call: MediaConnection,
-    sender: RTCRtpSender,
-    updateMetrics: {
-        updateCandidatePair: (mb: number) => void;
-        updateOutboundRtp: (mb: number) => void;
-        updateTransportSent: (mb: number) => void;
-        updateTransportReceived: (mb: number) => void;
-    }
-) {
+async function monitorAndAdjustBitrate(call: MediaConnection, sender: RTCRtpSender, updateMetrics: (metrics: { candidatePair: number; outboundRtp: number; transportSent: number; transportReceived: number; bitrate: number }) => void) {
     try {
         if (!call || !call.peerConnection) {
             console.warn("peerConnection not available");
@@ -105,20 +81,15 @@ async function monitorAndAdjustBitrate(
         let currentRtt = 0;
 
         stats.forEach((report) => {
-            // Puedes ver cada reporte en consola
-            // console.log("KK:", JSON.stringify(report, null, 2));
-
             if (report.type === "candidate-pair" && report.transportId === "T01") {
                 contador.candidatePairBytes += report.bytesSent;
                 contador.bytes += report.bytesSent;
                 contador.report += 1;
                 contador.packages += report.packetsSent;
             }
-
             if (report.type === "outbound-rtp") {
                 contador.outboundRtpBytes += report.bytesSent;
             }
-
             if (report.type === "transport" && report.transportId === "T01") {
                 if (report.bytesSent) {
                     contador.transportSentBytes += report.bytesSent;
@@ -127,20 +98,19 @@ async function monitorAndAdjustBitrate(
                     contador.transportReceivedBytes += report.bytesReceived;
                 }
             }
-
             if (report.type === "remote-inbound-rtp" && report.kind === "video") {
                 packetLoss = report.packetsLost || 0;
                 currentRtt = report.roundTripTime || 0;
             }
         });
 
-        // Actualizamos cada métrica en MB (convertido de bytes)
-        updateMetrics.updateCandidatePair(contador.candidatePairBytes / (1024 * 1024));
-        updateMetrics.updateOutboundRtp(contador.outboundRtpBytes / (1024 * 1024));
-        updateMetrics.updateTransportSent(contador.transportSentBytes / (1024 * 1024));
-        updateMetrics.updateTransportReceived(contador.transportReceivedBytes / (1024 * 1024));
+        // Actualiza todas las métricas en MB y bitrate en bps
+        const candidatePair = contador.candidatePairBytes / (1024 * 1024);
+        const outboundRtp = contador.outboundRtpBytes / (1024 * 1024);
+        const transportSent = contador.transportSentBytes / (1024 * 1024);
+        const transportReceived = contador.transportReceivedBytes / (1024 * 1024);
 
-        // Lógica de ajuste de bitrate según métricas de pérdida y RTT
+        // Lógica de ajuste de bitrate
         if (packetLoss >= 10 || currentRtt > 0.3) {
             const newBitrate = INITIAL_BITRATE * 0.8;
             adjustBitrate(sender, newBitrate);
@@ -148,6 +118,13 @@ async function monitorAndAdjustBitrate(
                 await adjustResolution(sender.track, "low");
             }
             console.log("Bitrate adjusted to:", newBitrate, "packetLoss:", packetLoss, "RTT:", currentRtt);
+            updateMetrics({
+                candidatePair,
+                outboundRtp,
+                transportSent,
+                transportReceived,
+                bitrate: newBitrate
+            });
         } else {
             if (sender.getParameters().encodings?.[0]?.maxBitrate !== INITIAL_BITRATE) {
                 adjustBitrate(sender, INITIAL_BITRATE);
@@ -156,6 +133,13 @@ async function monitorAndAdjustBitrate(
                 }
                 console.log("Bitrate adjusted to:", INITIAL_BITRATE, "packetLoss:", packetLoss, "RTT:", currentRtt);
             }
+            updateMetrics({
+                candidatePair,
+                outboundRtp,
+                transportSent,
+                transportReceived,
+                bitrate: INITIAL_BITRATE
+            });
         }
     } catch (err) {
         console.error("Error getting stats", err);
@@ -173,7 +157,7 @@ function throttle<F extends (...args: any[]) => void>(func: F, delay: number): F
     } as F;
 }
 
-// Función para formatear segundos a HH:mm:ss
+// Formatea segundos a HH:mm:ss
 function formatTime(totalSeconds: number) {
     const hours = Math.floor(totalSeconds / 3600)
         .toString()
@@ -190,14 +174,14 @@ export default function HostPage() {
     const [peer, setPeer] = useState<Peer | null>(null);
     const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
     const [connections, setConnections] = useState<DataConnection[]>([]);
-    // Estado para la métrica original (acumulación en MB)
-    const [mbConsumed, setMbConsumed] = useState(0);
-    // Estados para cada métrica separada
-    const [candidatePairConsumption, setCandidatePairConsumption] = useState(0);
-    const [outboundRtpConsumption, setOutboundRtpConsumption] = useState(0);
-    const [transportSentConsumption, setTransportSentConsumption] = useState(0);
-    const [transportReceivedConsumption, setTransportReceivedConsumption] = useState(0);
-    // Estado para el contador de transmisión (en segundos)
+    // Estado único para las métricas de streaming
+    const [streamingMetrics, setStreamingMetrics] = useState({
+        candidatePair: 0,
+        outboundRtp: 0,
+        transportSent: 0,
+        transportReceived: 0,
+        bitrate: INITIAL_BITRATE
+    });
     const [elapsedTime, setElapsedTime] = useState(0);
 
     const { toast } = useToast();
@@ -211,9 +195,7 @@ export default function HostPage() {
     const wsRef = useRef<WebSocket | null>(null);
 
     const reconnectWebSocket = () => {
-        if (wsRef.current) {
-            wsRef.current.close();
-        }
+        if (wsRef.current) wsRef.current.close();
         const ws = new WebSocket("ws://localhost:8080");
         ws.onopen = () => {
             console.log("WebSocket reconnected");
@@ -230,48 +212,32 @@ export default function HostPage() {
                 variant: "destructive"
             });
         };
-        ws.onclose = () => {
-            console.log("WebSocket closed");
-        };
+        ws.onclose = () => console.log("WebSocket closed");
         wsRef.current = ws;
     };
 
-    // Efecto para iniciar el contador cuando se activa la transmisión
+    // Inicia contador (tiempo) cuando hay transmisión
     useEffect(() => {
         let timerId: NodeJS.Timeout;
         if (activeStream) {
-            // Reiniciamos el contador
             setElapsedTime(0);
-            timerId = setInterval(() => {
-                setElapsedTime((prev) => prev + 1);
-            }, 1000);
+            timerId = setInterval(() => setElapsedTime((prev) => prev + 1), 1000);
         } else {
-            // Si no hay transmisión, detenemos el contador
             setElapsedTime(0);
         }
-        return () => {
-            clearInterval(timerId);
-        };
+        return () => clearInterval(timerId);
     }, [activeStream]);
 
     useEffect(() => {
         if (roomId) {
             const ws = new WebSocket("ws://localhost:8080");
-            ws.onopen = () => {
-                console.log("WebSocket connected");
-            };
-            ws.onerror = (error) => {
-                console.error("WebSocket error:", error);
-            };
-            ws.onclose = () => {
-                console.log("WebSocket closed");
-            };
+            ws.onopen = () => console.log("WebSocket connected");
+            ws.onerror = (error) => console.error("WebSocket error:", error);
+            ws.onclose = () => console.log("WebSocket closed");
             wsRef.current = ws;
         }
         return () => {
-            if (wsRef.current) {
-                wsRef.current.close();
-            }
+            if (wsRef.current) wsRef.current.close();
         };
     }, [roomId]);
 
@@ -296,9 +262,7 @@ export default function HostPage() {
                 }
             });
             setPeer(newPeer);
-            newPeer.on("open", (id) => {
-                setRoomId(id);
-            });
+            newPeer.on("open", (id) => setRoomId(id));
             newPeer.on("connection", (connection) => {
                 setConnections((prev) => [...prev, connection]);
                 console.log("New data connection from:", connection.peer);
@@ -345,8 +309,7 @@ export default function HostPage() {
                                         audio: {
                                             noiseSuppression: false,
                                             autoGainControl: false,
-                                            echoCancellation: false,
-                                            sampleRate: 16000
+                                            echoCancellation: false
                                         }
                                     });
                                     setActiveStream(stream);
@@ -369,19 +332,14 @@ export default function HostPage() {
             connections.forEach((connection) => {
                 const call = peer.call(connection.peer, activeStream!);
 
-                // Función para forzar H264 únicamente en el bloque de video
+                // Función para forzar H264 en el bloque de video (sin afectar al resto del SDP)
                 function forceH264inSDP(sdp: string): string {
                     const sdpLines = sdp.split("\r\n");
                     const mVideoIndex = sdpLines.findIndex((line) => line.startsWith("m=video"));
                     if (mVideoIndex === -1) return sdp;
-                    // Determinar el final del bloque video
                     let nextMLineIndex = sdpLines.findIndex((line, i) => i > mVideoIndex && line.startsWith("m="));
                     if (nextMLineIndex === -1) nextMLineIndex = sdpLines.length;
-
-                    // Extraer el bloque de video
                     let videoBlock = sdpLines.slice(mVideoIndex, nextMLineIndex);
-
-                    // Recolectar payloads H264 del bloque
                     const h264Payloads = new Set<string>();
                     videoBlock.forEach((line) => {
                         if (line.startsWith("a=rtpmap:") && line.toLowerCase().includes("h264")) {
@@ -395,8 +353,6 @@ export default function HostPage() {
                         console.warn("No se detectaron payloads H264 en video. SDP inalterado.");
                         return sdp;
                     }
-
-                    // Modificar la línea m=video para conservar solo payloads H264
                     const mLineParts = videoBlock[0].split(" ");
                     const mHeader = mLineParts.slice(0, 3);
                     const mPayloads = mLineParts.slice(3).filter((pt) => h264Payloads.has(pt));
@@ -405,8 +361,6 @@ export default function HostPage() {
                         return sdp;
                     }
                     videoBlock[0] = [...mHeader, ...mPayloads].join(" ");
-
-                    // Filtrar las líneas de atributos en el bloque video para quedarnos con H264
                     videoBlock = videoBlock.filter((line) => {
                         if (line.startsWith("a=rtpmap:") || line.startsWith("a=fmtp:") || line.startsWith("a=rtcp-fb:")) {
                             const payloadMatch = line.match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)/);
@@ -414,8 +368,6 @@ export default function HostPage() {
                         }
                         return true;
                     });
-
-                    // Reensamblar el SDP dejando intacto el resto
                     const newSdpLines = [...sdpLines.slice(0, mVideoIndex), ...videoBlock, ...sdpLines.slice(nextMLineIndex)];
                     return newSdpLines.join("\r\n");
                 }
@@ -431,23 +383,14 @@ export default function HostPage() {
                     return originalSetLocalDescription(description);
                 };
 
+                // Llamamos a monitorAndAdjustBitrate usando un único callback para actualizar las métricas
                 call.peerConnection.getSenders().forEach((sender) => {
                     if (sender.track?.kind === "video") {
-                        // ##################################################################
-                        // Adjusting initial bitrate
-                        adjustBitrate(sender, INITIAL_BITRATE);
-
-                        // ##################################################################
-                        // Start monitoring and adjusting bitrate
                         const monitorIntervalId = setInterval(() => {
-                            monitorAndAdjustBitrate(call, sender, {
-                                updateCandidatePair: setCandidatePairConsumption,
-                                updateOutboundRtp: setOutboundRtpConsumption,
-                                updateTransportSent: setTransportSentConsumption,
-                                updateTransportReceived: setTransportReceivedConsumption
+                            monitorAndAdjustBitrate(call, sender, (metrics) => {
+                                setStreamingMetrics(metrics);
                             });
                         }, MONITOR_INTERVAL);
-
                         sender.track.onended = () => {
                             clearInterval(monitorIntervalId);
                         };
@@ -479,6 +422,21 @@ export default function HostPage() {
         router.push("/");
     }
 
+    // Se agrupa la sección de estadísticas en una sola variable
+    const streamingStats = (
+        <div className="space-y-1">
+            <div className="text-sm text-gray-500">
+                <span>Current Bitrate: </span>
+                <span className="font-semibold">{(streamingMetrics.bitrate / 1000).toFixed(0)} kbps</span>
+            </div>
+            <div className="text-sm text-gray-500">Candidate-Pair Consumption: {streamingMetrics.candidatePair.toFixed(2)} MB</div>
+            <div className="text-sm text-gray-500">Outbound RTP Consumption: {streamingMetrics.outboundRtp.toFixed(2)} MB</div>
+            <div className="text-sm text-gray-500">Transport Sent: {streamingMetrics.transportSent.toFixed(2)} MB</div>
+            <div className="text-sm text-gray-500">Transport Received: {streamingMetrics.transportReceived.toFixed(2)} MB</div>
+            <div className="text-sm text-gray-500">Transmission Time: {formatTime(elapsedTime)}</div>
+        </div>
+    );
+
     return (
         <div className="py-8 px-4">
             <div className="max-w-2xl mx-auto space-y-8">
@@ -505,11 +463,7 @@ export default function HostPage() {
                             </div>
                             <span className="text-lg font-semibold">{connections.length}</span>
                         </div>
-                        <div className="text-sm text-gray-500">Candidate-Pair Consumption (consumo servidor): {candidatePairConsumption.toFixed(2)} MB</div>
-                        <div className="text-sm text-gray-500">Outbound RTP Consumption (consumo cliente): {outboundRtpConsumption.toFixed(2)} MB</div>
-                        <div className="text-sm text-gray-500">Transport Sent: {transportSentConsumption.toFixed(2)} MB</div>
-                        <div className="text-sm text-gray-500">Transport Received: {transportReceivedConsumption.toFixed(2)} MB</div>
-                        <div className="text-sm text-gray-500">Transmission Time: {formatTime(elapsedTime)}</div>
+                        {streamingStats}
                         <div className="flex justify-end">
                             <Button variant="outline" onClick={reconnectWebSocket}>
                                 Reconnect WebSocket

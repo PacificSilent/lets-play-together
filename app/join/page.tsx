@@ -36,7 +36,20 @@ export default function JoinPage() {
     const [videoPlaying, setVideoPlaying] = useState(true);
     const [videoMuted, setVideoMuted] = useState(true);
     const [showStats, setShowStats] = useState(false);
-    const [statsData, setStatsData] = useState({
+    const [statsData, setStatsData] = useState<{
+        fps: number;
+        packetLoss: number;
+        ms: number;
+        jitter: number;
+        width: number;
+        height: number;
+        videoEncoder: string;
+        consumptionMB: number;
+        timer: string;
+        audioCodec: string;
+        audioSampleRate: number;
+        bitrate: number;
+    }>({
         fps: 0,
         packetLoss: 0,
         ms: 0,
@@ -47,10 +60,15 @@ export default function JoinPage() {
         consumptionMB: 0,
         timer: "00:00:00",
         audioCodec: "",
-        audioSampleRate: 0
+        audioSampleRate: 0,
+        bitrate: 0
     });
     const [joinCall, setJoinCall] = useState<MediaConnection | null>(null);
     const [isPWA, setIsPWA] = useState(false);
+
+    // Estados para calcular el bitrate
+    const [prevBytes, setPrevBytes] = useState(0);
+    const [prevTime, setPrevTime] = useState(Date.now());
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const peerRef = useRef<Peer | null>(null);
@@ -120,7 +138,6 @@ export default function JoinPage() {
 
             peer.on("call", (call) => {
                 setJoinCall(call);
-                // Al recibir la llamada, iniciamos el contador si aún no existe
                 if (!joinStats.start) {
                     joinStats.start = Date.now();
                 }
@@ -215,6 +232,7 @@ export default function JoinPage() {
         }
     }
 
+    // Actualizar las estadísticas del stream e incluir el bitrate recibido
     useEffect(() => {
         let intervalId: ReturnType<typeof setInterval>;
         if (joinCall && joinCall.peerConnection) {
@@ -232,11 +250,8 @@ export default function JoinPage() {
                     let audioCodec = "";
                     let audioSampleRate = 0;
 
-                    // Recorremos el reporte de estadísticas
                     statsReport.forEach((report) => {
-                        console.log(JSON.stringify(report, null, 2));
                         if (report.type === "inbound-rtp") {
-                            // Sumamos bytesReceived de todos los reportes inbound-rtp
                             totalInboundBytes += report.bytesReceived || 0;
                             if (report.kind === "video") {
                                 framesPerSecond = (report as any).framesPerSecond || framesPerSecond;
@@ -249,21 +264,25 @@ export default function JoinPage() {
                         if (report.type === "candidate-pair") {
                             rtt = report.roundTripTime ? Math.round(report.currentRoundTripTime * 1000) : rtt;
                         }
-
                         if (report.type === "codec" && report.mimeType && report.mimeType.startsWith("video/")) {
                             codec = report.mimeType || codec;
                         }
-
-                        // Extraemos la info de audio del reporte de codec
                         if (report.type === "codec" && report.mimeType && report.mimeType.startsWith("audio/")) {
                             audioCodec = report.mimeType;
                             audioSampleRate = report.clockRate;
                         }
                     });
 
-                    // Actualizamos la variable global joinStats con los bytes recibidos
+                    // Calcular bitrate (diferencia de bytes recibidos entre intervalos)
+                    const now = Date.now();
+                    const elapsedSec = (now - prevTime) / 1000;
+                    const currentBitrate = elapsedSec > 0 ? ((totalInboundBytes - prevBytes) * 8) / elapsedSec : 0; // en bps
+                    setPrevBytes(totalInboundBytes);
+                    setPrevTime(now);
+
+                    // Actualizamos la variable global joinStats y el estado
                     joinStats.bytesReceived += totalInboundBytes;
-                    const elapsedSec = joinStats.start ? Math.floor((Date.now() - joinStats.start) / 1000) : 0;
+                    const elapsedStreamSec = joinStats.start ? Math.floor((Date.now() - joinStats.start) / 1000) : 0;
 
                     setStatsData({
                         fps: framesPerSecond,
@@ -274,9 +293,10 @@ export default function JoinPage() {
                         height: height,
                         videoEncoder: codec,
                         consumptionMB: joinStats.bytesReceived / (1024 * 1024),
-                        timer: formatTime(elapsedSec),
+                        timer: formatTime(elapsedStreamSec),
                         audioCodec: audioCodec,
-                        audioSampleRate: audioSampleRate
+                        audioSampleRate: audioSampleRate,
+                        bitrate: currentBitrate / 1000 // mostramos en kbps
                     });
                 } catch (err) {
                     console.error("Error updating stats", err);
@@ -286,7 +306,7 @@ export default function JoinPage() {
         return () => {
             if (intervalId) clearInterval(intervalId);
         };
-    }, [joinCall]);
+    }, [joinCall, prevBytes, prevTime]);
 
     return (
         <div className="py-8 px-4">
@@ -298,7 +318,6 @@ export default function JoinPage() {
                             Back to Home
                         </Link>
                     </Button>
-
                     <Card>
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
@@ -342,10 +361,11 @@ export default function JoinPage() {
                                                     Resolution: {statsData.width}x{statsData.height}
                                                 </p>
                                                 <p className="text-xs">Consumption: {statsData.consumptionMB.toFixed(2)} MB</p>
-                                                <p className="text-xs">Codec: {statsData.videoEncoder}</p>
-                                                <p className="text-xs">Streaming Time: {statsData.timer}</p>
+                                                <p className="text-xs">Video Codec: {statsData.videoEncoder}</p>
                                                 <p className="text-xs">Audio Codec: {statsData.audioCodec}</p>
-                                                <p className="text-xs">Sample Rate: {statsData.audioSampleRate} Hz</p>
+                                                <p className="text-xs">Audio Sample Rate: {statsData.audioSampleRate} Hz</p>
+                                                <p className="text-xs">Bitrate: {statsData.bitrate.toFixed(0)} kbps</p>
+                                                <p className="text-xs">Streaming Time: {statsData.timer}</p>
                                             </div>
                                         )}
                                     </div>
