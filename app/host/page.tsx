@@ -98,26 +98,28 @@ async function monitorAndAdjustBitrate(call: MediaConnection, sender: RTCRtpSend
                     contador.transportReceivedBytes += report.bytesReceived;
                 }
             }
-            if (report.type === "remote-inbound-rtp" && report.kind === "video") {
-                packetLoss = report.packetsLost || 0;
+            if (report.type === "remote-inbound-rtp") {
+                // Convertir fractionLost a porcentaje: (fractionLost / 256) * 100
+                const fractionLostRaw = report.fractionLost || 0;
+                packetLoss = (fractionLostRaw / 256) * 100;
                 currentRtt = report.roundTripTime || 0;
             }
         });
 
-        // Actualiza todas las métricas en MB y bitrate en bps
+        // Convertir las métricas a MB
         const candidatePair = contador.candidatePairBytes / (1024 * 1024);
         const outboundRtp = contador.outboundRtpBytes / (1024 * 1024);
         const transportSent = contador.transportSentBytes / (1024 * 1024);
         const transportReceived = contador.transportReceivedBytes / (1024 * 1024);
 
-        // Lógica de ajuste de bitrate
+        // Si el porcentaje de pérdida es mayor o igual que 10% o el RTT mayor que 0.3, ajustar el bitrate
         if (packetLoss >= 10 || currentRtt > 0.3) {
             const newBitrate = INITIAL_BITRATE * 0.8;
             adjustBitrate(sender, newBitrate);
             if (sender.track) {
                 await adjustResolution(sender.track, "low");
             }
-            console.log("Bitrate adjusted to:", newBitrate, "packetLoss:", packetLoss, "RTT:", currentRtt);
+            console.log("Bitrate adjusted to:", newBitrate, "fractionLost (%):", packetLoss, "RTT:", currentRtt);
             updateMetrics({
                 candidatePair,
                 outboundRtp,
@@ -131,7 +133,7 @@ async function monitorAndAdjustBitrate(call: MediaConnection, sender: RTCRtpSend
                 if (sender.track) {
                     await adjustResolution(sender.track, "high");
                 }
-                console.log("Bitrate adjusted to:", INITIAL_BITRATE, "packetLoss:", packetLoss, "RTT:", currentRtt);
+                console.log("Bitrate adjusted to:", INITIAL_BITRATE, "fractionLost (%):", packetLoss, "RTT:", currentRtt);
             }
             updateMetrics({
                 candidatePair,

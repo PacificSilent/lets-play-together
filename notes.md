@@ -13,9 +13,3 @@ PENDING TASKS:
 - MULTI-LANGUAGE SUPPORT
 - FORK ON GIT
 - UPLOAD VIGEM SOCKET REPO TO GIT
-
----
-
-- arreglar con fractionlost los paquetes perdidos y reducir bitrate hacer pruebas con internet inestable
-- h264 no funciona
-- sample rate de audio no se ve afectado
