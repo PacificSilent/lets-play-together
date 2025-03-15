@@ -15,6 +15,17 @@ import { customAlphabet } from "nanoid";
 // 3mbps
 const INITIAL_BITRATE = 3000000;
 const MONITOR_INTERVAL = 1000;
+
+const MAX_RESOLUTION = {
+    width: 1920,
+    height: 1080
+};
+
+const LOW_RESOLUTION = {
+    width: 1366,
+    height: 768
+};
+
 const simpleNanoid = customAlphabet("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 4);
 
 // Variable global que acumula todas las métricas
@@ -47,19 +58,21 @@ function adjustBitrate(sender: RTCRtpSender, targetBitrate: number) {
 async function adjustResolution(track: MediaStreamTrack, resolution: "low" | "high") {
     try {
         if (track.kind === "audio") {
-            await track.applyConstraints({ sampleRate: 16000 });
+            await track.applyConstraints({
+                sampleRate: { ideal: 16000 }
+            });
         } else {
             if (resolution === "low") {
                 await track.applyConstraints({
                     frameRate: { ideal: 60, max: 60 },
-                    width: { ideal: 1366, max: 1366 },
-                    height: { ideal: 768, max: 768 }
+                    width: { ideal: LOW_RESOLUTION.width, max: LOW_RESOLUTION.width },
+                    height: { ideal: LOW_RESOLUTION.height, max: LOW_RESOLUTION.height }
                 });
             } else {
                 await track.applyConstraints({
                     frameRate: { ideal: 60, max: 60 },
-                    width: { ideal: 1920, max: 1920 },
-                    height: { ideal: 1080, max: 1080 }
+                    width: { ideal: MAX_RESOLUTION.width, max: MAX_RESOLUTION.width },
+                    height: { ideal: MAX_RESOLUTION.height, max: MAX_RESOLUTION.height }
                 });
             }
         }
@@ -96,9 +109,7 @@ async function monitorAndAdjustBitrate(
             // console.log("KK:", JSON.stringify(report, null, 2));
 
             if (report.type === "candidate-pair" && report.transportId === "T01") {
-                // Acumulamos para candidate-pair en la variable global
                 contador.candidatePairBytes += report.bytesSent;
-                // También se usa para ajustar bitrate con contador
                 contador.bytes += report.bytesSent;
                 contador.report += 1;
                 contador.packages += report.packetsSent;
@@ -328,8 +339,8 @@ export default function HostPage() {
                                     const stream = await navigator.mediaDevices.getDisplayMedia({
                                         video: {
                                             frameRate: { ideal: 60, max: 60 },
-                                            width: { ideal: 1920, max: 1920 },
-                                            height: { ideal: 1080, max: 1080 }
+                                            width: { ideal: MAX_RESOLUTION.width, max: MAX_RESOLUTION.width },
+                                            height: { ideal: MAX_RESOLUTION.height, max: MAX_RESOLUTION.height }
                                         },
                                         audio: {
                                             noiseSuppression: false,
@@ -357,26 +368,77 @@ export default function HostPage() {
             if (!peer || !activeStream || connections.length === 0) return;
             connections.forEach((connection) => {
                 const call = peer.call(connection.peer, activeStream!);
-                call.peerConnection.getTransceivers().forEach((transceiver) => {
-                    if (transceiver.sender && transceiver.sender.track?.kind === "video") {
-                        const videoCaps = RTCRtpSender.getCapabilities("video");
-                        if (videoCaps) {
-                            const h264Codecs = videoCaps.codecs.filter((codec) => {
-                                const mime = codec.mimeType.toLowerCase();
-                                return mime.includes("h264");
-                            });
-                            if (h264Codecs.length) {
-                                transceiver.setCodecPreferences(h264Codecs);
-                                console.log("H264 codec preferences set:", h264Codecs);
-                            } else {
-                                console.warn("H264 codecs not found in video capabilities.");
+
+                // Función para forzar H264 únicamente en el bloque de video
+                function forceH264inSDP(sdp: string): string {
+                    const sdpLines = sdp.split("\r\n");
+                    const mVideoIndex = sdpLines.findIndex((line) => line.startsWith("m=video"));
+                    if (mVideoIndex === -1) return sdp;
+                    // Determinar el final del bloque video
+                    let nextMLineIndex = sdpLines.findIndex((line, i) => i > mVideoIndex && line.startsWith("m="));
+                    if (nextMLineIndex === -1) nextMLineIndex = sdpLines.length;
+
+                    // Extraer el bloque de video
+                    let videoBlock = sdpLines.slice(mVideoIndex, nextMLineIndex);
+
+                    // Recolectar payloads H264 del bloque
+                    const h264Payloads = new Set<string>();
+                    videoBlock.forEach((line) => {
+                        if (line.startsWith("a=rtpmap:") && line.toLowerCase().includes("h264")) {
+                            const match = line.match(/^a=rtpmap:(\d+)\s/);
+                            if (match && match[1]) {
+                                h264Payloads.add(match[1]);
                             }
                         }
+                    });
+                    if (h264Payloads.size === 0) {
+                        console.warn("No se detectaron payloads H264 en video. SDP inalterado.");
+                        return sdp;
                     }
-                });
+
+                    // Modificar la línea m=video para conservar solo payloads H264
+                    const mLineParts = videoBlock[0].split(" ");
+                    const mHeader = mLineParts.slice(0, 3);
+                    const mPayloads = mLineParts.slice(3).filter((pt) => h264Payloads.has(pt));
+                    if (mPayloads.length === 0) {
+                        console.warn("No se encontró ningún payload H264 en m=video. SDP inalterado.");
+                        return sdp;
+                    }
+                    videoBlock[0] = [...mHeader, ...mPayloads].join(" ");
+
+                    // Filtrar las líneas de atributos en el bloque video para quedarnos con H264
+                    videoBlock = videoBlock.filter((line) => {
+                        if (line.startsWith("a=rtpmap:") || line.startsWith("a=fmtp:") || line.startsWith("a=rtcp-fb:")) {
+                            const payloadMatch = line.match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)/);
+                            return payloadMatch && payloadMatch[1] && h264Payloads.has(payloadMatch[1]);
+                        }
+                        return true;
+                    });
+
+                    // Reensamblar el SDP dejando intacto el resto
+                    const newSdpLines = [...sdpLines.slice(0, mVideoIndex), ...videoBlock, ...sdpLines.slice(nextMLineIndex)];
+                    return newSdpLines.join("\r\n");
+                }
+
+                const pc = call.peerConnection;
+                const originalSetLocalDescription = pc.setLocalDescription.bind(pc);
+                pc.setLocalDescription = (description: RTCSessionDescriptionInit) => {
+                    if (description && description.sdp) {
+                        let modifiedSdp = forceH264inSDP(description.sdp);
+                        description.sdp = modifiedSdp;
+                        console.log("SDP modificado:", description.sdp);
+                    }
+                    return originalSetLocalDescription(description);
+                };
+
                 call.peerConnection.getSenders().forEach((sender) => {
                     if (sender.track?.kind === "video") {
+                        // ##################################################################
+                        // Adjusting initial bitrate
                         adjustBitrate(sender, INITIAL_BITRATE);
+
+                        // ##################################################################
+                        // Start monitoring and adjusting bitrate
                         const monitorIntervalId = setInterval(() => {
                             monitorAndAdjustBitrate(call, sender, {
                                 updateCandidatePair: setCandidatePairConsumption,
@@ -385,6 +447,7 @@ export default function HostPage() {
                                 updateTransportReceived: setTransportReceivedConsumption
                             });
                         }, MONITOR_INTERVAL);
+
                         sender.track.onended = () => {
                             clearInterval(monitorIntervalId);
                         };

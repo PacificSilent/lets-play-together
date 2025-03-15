@@ -250,7 +250,7 @@ export default function JoinPage() {
                             rtt = report.roundTripTime ? Math.round(report.currentRoundTripTime * 1000) : rtt;
                         }
 
-                        if (report.type === "codec") {
+                        if (report.type === "codec" && report.mimeType && report.mimeType.startsWith("video/")) {
                             codec = report.mimeType || codec;
                         }
 
